@@ -1,132 +1,137 @@
-# core/server.py
-
-import uvicorn
+import json
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+import uvicorn
 
-from . import manager, persistence
+CONFIG_PATH = Path.cwd() / "jadio_config" / "llmnet_config.json"
 
 app = FastAPI(
-    title="Jadio LLM LAN Server",
-    description="Local service to manage ports, lazy-load models, and persist state for VS Code extension.",
-    version="1.0.0"
+    title="LLMNet LAN Server",
+    description="Manage local AI model assignments and ports.",
+    version="0.1.0"
 )
 
-# Load persistent config on startup
-config = persistence.load_config()
+
+#
+# === CONFIG HELPERS ===
+#
+
+def load_config():
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}. Please run 'llmnet init'.")
+    with CONFIG_PATH.open(encoding="utf-8") as f:
+        return json.load(f)
 
 
-# --- Pydantic Models for Requests ---
-class AddModelRequest(BaseModel):
-    name: str
+def save_config(config):
+    with CONFIG_PATH.open("w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+
+def get_server_port(config):
+    return config.get("port", 47600)
+
+
+#
+# === Pydantic models for requests ===
+#
+
+class AssignRequest(BaseModel):
+    port: int
+    model: str
     path: str
-    backend: str
-
-class NameChangeRequest(BaseModel):
-    old_name: str
-    new_name: str
-
-class SimpleNameRequest(BaseModel):
-    name: str
+    lazy: bool = True
 
 
-# --- API Endpoints ---
+class UnassignRequest(BaseModel):
+    port: int
+
+
+#
+# === ROUTES ===
+#
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
 
 @app.get("/status")
 def get_status():
-    """
-    Returns server health and all model statuses.
-    """
-    models = manager.list_models(config)
-    return {"status": "ok", "models": models}
+    try:
+        config = load_config()
+        return {
+            "status": "LLMNet server is running",
+            "assigned": config.get("assigned", {}),
+            "locked_ports": config.get("locked_ports", [])
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/models")
-def get_models():
-    """
-    Returns all registered models.
-    """
-    return manager.list_models(config)
+@app.post("/assign")
+def assign_model(request: AssignRequest):
+    try:
+        config = load_config()
+
+        if request.port not in config.get("locked_ports", []):
+            raise HTTPException(status_code=400, detail=f"Port {request.port} is not locked/available.")
+
+        if str(request.port) in config.get("assigned", {}):
+            raise HTTPException(status_code=400, detail=f"Port {request.port} is already assigned.")
+
+        # Add assignment
+        config.setdefault("assigned", {})[str(request.port)] = {
+            "model": request.model,
+            "path": request.path,
+            "lazy": request.lazy
+        }
+
+        save_config(config)
+        return {"message": f"Model '{request.model}' assigned to port {request.port}."}
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/start")
-def start_model(req: SimpleNameRequest):
-    """
-    Starts the specified model (lazy load).
-    """
-    result = manager.start_model(config, req.name)
-    persistence.save_config(config)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["message"])
-    return result
+@app.post("/unassign")
+def unassign_model(request: UnassignRequest):
+    try:
+        config = load_config()
+
+        if str(request.port) not in config.get("assigned", {}):
+            raise HTTPException(status_code=400, detail=f"Port {request.port} is not assigned.")
+
+        # Remove assignment
+        del config["assigned"][str(request.port)]
+
+        save_config(config)
+        return {"message": f"Port {request.port} unassigned successfully."}
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/stop")
-def stop_model(req: SimpleNameRequest):
-    """
-    Stops the specified model.
-    """
-    result = manager.stop_model(config, req.name)
-    persistence.save_config(config)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["message"])
-    return result
+@app.get("/")
+def root():
+    return {"message": "Welcome to LLMNet LAN Server. Use /status, /assign, /unassign."}
 
 
-@app.post("/add")
-def add_model(req: AddModelRequest):
-    """
-    Registers a new model and assigns it a port.
-    """
-    result = manager.add_model(config, req.name, req.path, req.backend)
-    persistence.save_config(config)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["message"])
-    return result
-
-
-@app.post("/remove")
-def remove_model(req: SimpleNameRequest):
-    """
-    Unregisters a model from the system.
-    """
-    result = manager.remove_model(config, req.name)
-    persistence.save_config(config)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["message"])
-    return result
-
-
-@app.post("/name")
-def rename_model(req: NameChangeRequest):
-    """
-    Changes the friendly name of a model in the config.
-    """
-    result = manager.rename_model(config, req.old_name, req.new_name)
-    persistence.save_config(config)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["message"])
-    return result
-
-
-@app.post("/persist")
-def persist_config():
-    """
-    Forces saving current config to disk.
-    """
-    persistence.save_config(config)
-    return {"success": True, "message": "Config saved to disk."}
-
-
-# --- Entrypoint ---
+#
+# === ENTRY POINT ===
+#
 
 def run_server():
-    """
-    Starts the FastAPI server for LAN.
-    """
-    uvicorn.run("core.server:app", host="127.0.0.1", port=5050, reload=False)
-
-
-if __name__ == "__main__":
-    run_server()
+    try:
+        config = load_config()
+        port = get_server_port(config)
+        print(f"✅ Loaded configuration from {CONFIG_PATH}")
+        print(f"⚡️ Starting LLMNet server on port {port}...")
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        print(f"❌ Failed to start server: {e}")

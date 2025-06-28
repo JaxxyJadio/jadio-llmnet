@@ -11,7 +11,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
 dependencies = [
-    "jadio>=0.0.2",
+    "jadio>=0.0.3",
 ]
 
 [tool.hatch.version]
