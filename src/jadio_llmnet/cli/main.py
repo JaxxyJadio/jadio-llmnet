@@ -1,5 +1,3 @@
-# Entry point for CLI
-
 import sys
 import importlib
 
@@ -10,6 +8,7 @@ COMMANDS = {
     "status": "status",
     "add": "add",
     "remove": "remove",
+    "start": "start",  # Add this line
     "stop": "stop",
     "persist": "persist",
     "name": "name",
@@ -30,6 +29,7 @@ Available Commands:
   status            View assigned models and ports
   add               Add a model to a port
   remove            Remove a model from a port
+  start             Start the LLMNet server
   stop              Stop the LLMNet server
   persist           Enable or disable persistence
   name              Rename an assigned model
@@ -38,6 +38,7 @@ Available Commands:
 Examples:
   llmnet init
   llmnet login
+  llmnet start
   llmnet add
   llmnet remove
   llmnet account create
@@ -64,6 +65,8 @@ def main():
         cli_module.run(cli_args)
     except Exception as e:
         print(f"❌ Error running command '{cmd}': {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

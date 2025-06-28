@@ -12,6 +12,10 @@ license = "MIT"
 requires-python = ">=3.8"
 dependencies = [
     "jadio>=0.0.2",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.0.0",
+    "cryptography>=41.0.0",
 ]
 
 [project.scripts]

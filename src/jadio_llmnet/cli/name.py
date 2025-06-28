@@ -1,29 +1,26 @@
-import json
-from pathlib import Path
-
-CONFIG_PATH = Path.cwd() / "jadio_config" / "llmnet_config.json"
+from jadio_llmnet.core import manager
 
 def run(args=None):
-    print("⚡️ LLMNet LOGOUT\n")
+    print("⚡️ LLMNet NAME\n")
 
-    if not CONFIG_PATH.exists():
-        print("❌ llmnet_config.json not found. Did you run 'llmnet init'?")
+    if not manager.is_logged_in():
+        print("❌ You must be logged in to rename a model.")
         return
 
     try:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
-            config = json.load(f)
+        port_input = input("Enter port number: ").strip()
+        port = int(port_input)
+    except ValueError:
+        print("❌ Invalid port number.")
+        return
 
-        if not config.get("logged_in", False):
-            print("ℹ️  Already logged out.")
-            return
+    new_name = input("Enter new name: ").strip()
+    if not new_name:
+        print("❌ Name cannot be empty.")
+        return
 
-        config["logged_in"] = False
-
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-
-        print("✅ Logged out. You are now signed out of LLMNet.")
-
+    try:
+        manager.rename_model(port, new_name)
+        print(f"✅ Model on port {port} renamed to '{new_name}'.")
     except Exception as e:
-        print(f"❌ Error during logout: {e}")
+        print(f"❌ Failed to rename model: {e}")

@@ -1,60 +1,66 @@
 import json
+import os
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
-import uvicorn
+from multiprocessing import Process
+import time
 
-CONFIG_PATH = Path.cwd() / "jadio_config" / "llmnet_config.json"
+CONFIG_DIR = Path.cwd() / "jadio_config"
+PID_FILE = CONFIG_DIR / "llmnet.pid"
 
-app = FastAPI(title="LLMNet LAN Server", description="Manages local model assignments and ports.")
-
-
-def load_config():
-    """Load llmnet_config.json from jadio_config folder."""
-    if not CONFIG_PATH.exists():
-        raise FileNotFoundError(f"❌ Config file not found at {CONFIG_PATH}. Did you run 'llmnet init'?")
+def run(args=None):
+    """Start the LLMNet server"""
+    print("⚡️ Starting LLMNet Server...\n")
+    
+    # Check if server is already running
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            # Check if process is actually running
+            os.kill(pid, 0)
+            print("❌ LLMNet server is already running (PID: {})".format(pid))
+            return
+        except (ProcessLookupError, ValueError):
+            # Process not running or invalid PID, clean up
+            PID_FILE.unlink()
+    
+    # Import here to avoid circular imports
+    from jadio_llmnet.core.server import run_server
+    
+    # Start server in a subprocess
     try:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"❌ Invalid JSON in llmnet_config.json: {e}")
-
-
-def get_server_port(config):
-    """Returns the port to run the server on."""
-    return config.get("port", 47600)
-
-
-@app.get("/status")
-def get_status():
-    """
-    Get current server status.
-    Returns the entire config (safe for LAN introspection).
-    """
-    try:
-        config = load_config()
-        return {
-            "status": "LLMNet server is running",
-            "config": config
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/")
-def root():
-    return {"message": "LLMNet LAN Server. See /status."}
-
-
-def run_server():
-    """
-    Entry point to start the server.
-    Reads config, chooses port, starts FastAPI via uvicorn.
-    """
-    try:
-        config = load_config()
-        port = get_server_port(config)
-        print(f"✅ Loaded configuration from {CONFIG_PATH}")
-        print(f"⚡️ Starting LLMNet server on port {port}...")
-        uvicorn.run(app, host="0.0.0.0", port=port)
+        # Fork process on Unix-like systems
+        if hasattr(os, 'fork'):
+            pid = os.fork()
+            if pid > 0:
+                # Parent process
+                PID_FILE.write_text(str(pid))
+                print(f"✅ LLMNet server started in background (PID: {pid})")
+                print("📡 Use 'llmnet stop' to stop the server")
+                return
+            else:
+                # Child process
+                run_server()
+        else:
+            # Windows doesn't support fork, use multiprocessing
+            from multiprocessing import Process
+            server_process = Process(target=run_server)
+            server_process.start()
+            
+            # Write PID
+            PID_FILE.write_text(str(server_process.pid))
+            print(f"✅ LLMNet server started (PID: {server_process.pid})")
+            print("📡 Use 'llmnet stop' to stop the server")
+            print("⚠️  On Windows, the server runs in foreground. Use Ctrl+C to stop.")
+            
+            # On Windows, we need to keep the parent alive
+            try:
+                server_process.join()
+            except KeyboardInterrupt:
+                server_process.terminate()
+                PID_FILE.unlink()
+                print("\n✅ Server stopped.")
+    
     except Exception as e:
         print(f"❌ Failed to start server: {e}")
+        import traceback
+        traceback.print_exc()

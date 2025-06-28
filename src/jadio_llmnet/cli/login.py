@@ -1,9 +1,10 @@
 from getpass import getpass
-from jadio_llmnet.core import interpreter, manager
+from jadio_llmnet.core import interpreter
 import json
 from pathlib import Path
 
-CONFIG_PATH = Path.cwd() / "jadio_config" / "llmnet_config.json"
+CONFIG_DIR = Path.cwd() / "jadio_config"
+GLOBAL_CONFIG = CONFIG_DIR / "llmnet_config.json"
 
 def run(args=None):
     print("⚡️ LLMNet LOGIN\n")
@@ -22,26 +23,52 @@ def run(args=None):
 
     # 3️⃣ Validate with interpreter
     if not interpreter.validate_login(username, password):
-        print("❌ Login failed. Check username and password.")
+        print("❌ Login failed.")
         return
 
     print("✅ Login successful!")
 
-    # 4️⃣ Update logged_in flag in llmnet_config.json
+    # 4️⃣ Update global config to set current user
     try:
-        if not CONFIG_PATH.exists():
-            print("❌ llmnet_config.json not found. Did you run 'llmnet init'?")
-            return
+        if not GLOBAL_CONFIG.exists():
+            # Create minimal global config if it doesn't exist
+            global_data = {}
+        else:
+            with open(GLOBAL_CONFIG, encoding="utf-8") as f:
+                global_data = json.load(f)
 
-        with open(CONFIG_PATH, encoding="utf-8") as f:
-            config = json.load(f)
+        # Set current account
+        global_data["current_account"] = username
+        
+        with open(GLOBAL_CONFIG, "w", encoding="utf-8") as f:
+            json.dump(global_data, f, indent=2)
 
-        config["logged_in"] = True
+        # 5️⃣ Update user-specific config
+        user_config_file = CONFIG_DIR / f"llmnet_config_{username}.json"
+        
+        # If user config doesn't exist, copy from main config
+        if not user_config_file.exists() and GLOBAL_CONFIG.exists():
+            main_config_file = CONFIG_DIR / "llmnet_config.json"
+            if main_config_file.exists():
+                with open(main_config_file, "r") as f:
+                    user_config = json.load(f)
+            else:
+                user_config = {
+                    "version": "0.0.1",
+                    "locked_ports": [47600, 47601, 47602],
+                    "assigned": {},
+                    "port": 47600
+                }
+        else:
+            with open(user_config_file, "r") as f:
+                user_config = json.load(f)
 
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        user_config["logged_in"] = True
+        
+        with open(user_config_file, "w") as f:
+            json.dump(user_config, f, indent=2)
 
-        print("✅ LLMNet is now marked as logged in.")
+        print(f"✅ Logged in as '{username}'.")
 
     except Exception as e:
         print(f"❌ Failed to update login state: {e}")

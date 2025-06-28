@@ -1,16 +1,36 @@
 import json
 from pathlib import Path
 
-CONFIG_PATH = Path.cwd() / "jadio_config" / "llmnet_config.json"
+CONFIG_DIR = Path.cwd() / "jadio_config"
+GLOBAL_CONFIG = CONFIG_DIR / "llmnet_config.json"
+
+def get_current_user_config_path():
+    """Get the config path for the currently logged in user"""
+    if not GLOBAL_CONFIG.exists():
+        return CONFIG_DIR / "llmnet_config.json"  # Fallback to default
+    
+    with open(GLOBAL_CONFIG, "r") as f:
+        global_data = json.load(f)
+    
+    current_user = global_data.get("current_account")
+    if current_user:
+        user_config = CONFIG_DIR / f"llmnet_config_{current_user}.json"
+        if user_config.exists():
+            return user_config
+    
+    # Fallback to default config
+    return CONFIG_DIR / "llmnet_config.json"
 
 def load_config():
-    if not CONFIG_PATH.exists():
-        raise FileNotFoundError("llmnet_config.json not found. Did you run 'llmnet init'?")
-    with CONFIG_PATH.open(encoding="utf-8") as f:
+    config_path = get_current_user_config_path()
+    if not config_path.exists():
+        raise FileNotFoundError("Config not found. Did you run 'llmnet init'?")
+    with config_path.open(encoding="utf-8") as f:
         return json.load(f)
 
 def save_config(config):
-    with CONFIG_PATH.open("w", encoding="utf-8") as f:
+    config_path = get_current_user_config_path()
+    with config_path.open("w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 
 def is_logged_in():
